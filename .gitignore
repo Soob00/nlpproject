@@ -1,0 +1,18 @@
+## Model checkpoints (large binary files)
+models/
+result/
+
+## Generated analysis outputs
+analysis/output/
+
+## Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+
+## OS
+.DS_Store
+Thumbs.db
+
+## Large data packages
+LINUX_PACKAGES_LICENSES
