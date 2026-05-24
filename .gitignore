@@ -2,8 +2,15 @@
 models/
 result/
 
+## Raw source data (public dataset, not reproduced here)
+data/raw/
+data/rumoureval2019/
+
 ## Generated analysis outputs
 analysis/output/
+
+## Archives / Colab exports
+*.zip
 
 ## Python
 __pycache__/
