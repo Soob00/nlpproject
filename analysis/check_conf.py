@@ -1,15 +1,19 @@
-import json
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import DATA_RESULTS, CONF_FILES, CONDITIONS, LABELS
+from _paths import DATA_RESULTS, CONF_FILES, CONDITIONS, LABELS, EVAL_SPLIT, load_conf
 
 label_order = LABELS
 
 for fname, model in [(DATA_RESULTS / k, v) for k, v in CONF_FILES.items()]:
-    with open(fname, encoding="utf-8") as f:
-        data = json.load(f)
+    if not fname.exists():
+        print(f"[skip] {fname.name} not found")
+        continue
+    data = load_conf(fname, split=EVAL_SPLIT)
+    if not data:
+        print(f"[skip] no records for split='{EVAL_SPLIT}' in {fname.name}")
+        continue
     print(f'\n========== {model} ==========')
     for cond in CONDITIONS:
         print(f'\n  [{cond}]')

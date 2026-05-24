@@ -13,7 +13,7 @@ Output: analysis/output/dataset_validity.csv
 Reports per (split, condition):
   - total replies
   - non-null (available) count and %
-  - valid_cc=True count (for conflicting/mixed)
+  - valid_cc=True count (for c3/c4)
   - valid_ti=True count
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import DATA_PROCESSED, OUTPUT, CONDITIONS
+from _paths import DATA_PROCESSED, OUTPUT, CONDITIONS, COND_TO_FIELD
 
 import pandas as pd
 
@@ -41,21 +41,22 @@ def main() -> None:
     records = load_ctx(path)
 
     rows = []
-    for split in ["train", "dev"]:
+    for split in ["train", "dev", "test"]:
         split_recs = [r for r in records if r.get("split") == split]
         total = len(split_recs)
         for cond in CONDITIONS:
-            available = [r for r in split_recs if r.get(cond) is not None]
-            valid_cc = [r for r in available if r.get("valid_cc", True)]
-            valid_ti = [r for r in available if r.get("valid_ti", True)]
+            field = COND_TO_FIELD[cond]
+            available = [r for r in split_recs if r.get(field) is not None]
+            valid_cc = [r for r in available if r.get("valid_cc", False)] if field in ("conflicting", "mixed") else []
+            valid_ti = [r for r in available if r.get("valid_ti", False)] if field == "irrelevant" else []
             rows.append({
                 "split": split,
                 "condition": cond,
                 "total_replies": total,
                 "available": len(available),
                 "available_%": round(len(available) / total * 100, 1) if total else 0,
-                "valid_cc": len(valid_cc),
-                "valid_ti": len(valid_ti),
+                "valid_cc": len(valid_cc) if field in ("conflicting", "mixed") else None,
+                "valid_ti": len(valid_ti) if field == "irrelevant" else None,
             })
 
     df = pd.DataFrame(rows)

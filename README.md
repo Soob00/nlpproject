@@ -1,58 +1,95 @@
----
-base_model: Qwen/Qwen2.5-3B-Instruct
-library_name: transformers
-model_name: qwen_3b_adv
-tags:
-- generated_from_trainer
-- sft
-- trl
-licence: license
----
+# RumourEval Context Sensitivity Experiments
 
-# Model Card for qwen_3b_adv
+This repository builds and evaluates Qwen2.5 stance classifiers on RumourEval 2019.
+The main question is how different context conditions affect stance prediction and
+model confidence for social media rumour replies.
 
-This model is a fine-tuned version of [Qwen/Qwen2.5-3B-Instruct](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct).
-It has been trained using [TRL](https://github.com/huggingface/trl).
+## Pipeline
 
-## Quick start
+1. Build the processed dataset:
 
-```python
-from transformers import pipeline
-
-question = "If you had a time machine, but could only go to the past or the future once and never return, which would you choose and why?"
-generator = pipeline("text-generation", model="None", device="cuda")
-output = generator([{"role": "user", "content": question}], max_new_tokens=128, return_full_text=False)[0]
-print(output["generated_text"])
+```bash
+python build_dataset.py
 ```
 
-## Training procedure
+This writes `data/processed/context_conditions.json` with six conditions:
 
- 
+| key | field | meaning |
+| --- | --- | --- |
+| `c0` | `reply_only` | target reply only |
+| `c1` | `useful` | source post plus parent context when available |
+| `c2` | `irrelevant` | source post plus unrelated comment context |
+| `c3` | `conflicting` | source post plus opposing stance context |
+| `c4` | `mixed` | useful context plus misleading context |
+| `c5` | `lexical` | label-biased lexical distractor |
 
+Invalid c2/c3/c4 examples are stored as `null` and skipped for that condition.
 
+2. Train LoRA adapters:
 
-This model was trained with SFT.
-
-### Framework versions
-
-- TRL: 1.4.0
-- Transformers: 5.7.0
-- Pytorch: 2.11.0
-- Datasets: 4.8.5
-- Tokenizers: 0.22.2
-
-## Citations
-
-
-
-Cite TRL as:
-    
-```bibtex
-@software{vonwerra2020trl,
-  title   = {{TRL: Transformers Reinforcement Learning}},
-  author  = {von Werra, Leandro and Belkada, Younes and Tunstall, Lewis and Beeching, Edward and Thrush, Tristan and Lambert, Nathan and Huang, Shengyi and Rasul, Kashif and Gallouédec, Quentin},
-  license = {Apache-2.0},
-  url     = {https://github.com/huggingface/trl},
-  year    = {2020}
-}
+```bash
+python training/train.py --model-size 1.5b --variant ft
+python training/train.py --model-size 1.5b --variant adv
 ```
+
+`ft` trains on useful context only. `adv` trains on useful, conflicting, and mixed
+conditions. Final adapters are saved under `models/qwen_{size}_{variant}/final/`.
+
+3. Run evaluation:
+
+```bash
+python inference/run_eval.py --model-size 1.5b --variant adv --split dev
+python inference/run_eval.py --model-size 3b --variant zs --split all
+```
+
+CPU-only evaluation:
+
+```bash
+python inference/run_eval_cpu.py --model-size 0.5b --variant zs --split dev
+python inference/run_eval_cpu.py --model-size 1.5b --variant adv --split dev
+```
+
+GPU evaluation uses the same script with `--device cuda`:
+
+```bash
+python inference/run_eval_gpu.py --model-size 3b --variant zs --split dev
+```
+
+Outputs are written to `data/results/experiment_results_{SIZE}_{variant}.json`.
+Each condition stores `golds`, `preds`, `reply_ids`, invalid/skipped IDs, macro-F1,
+and per-class F1.
+
+4. Extract confidence scores:
+
+```bash
+python inference/run_conf.py --model-size 1.5b --variant ft --split dev
+python inference/run_conf.py --model-size 1.5b --variant adv --split dev
+python inference/run_conf_cpu.py --model-size 0.5b --variant zs --split dev
+python inference/run_conf_gpu.py --model-size 3b --variant zs --split dev
+python inference/run_conf_gpu.py --model-size 1.5b --variant adv --split dev
+```
+
+Outputs are written to `data/results/confidence_results_{SIZE}_{variant}.json`.
+
+5. Generate analysis tables:
+
+```bash
+python analysis/run_all.py
+```
+
+CSV outputs go to `analysis/output/`; figures go to `figures/`.
+
+## CPU vs GPU
+
+- Analysis scripts are CPU-only.
+- Inference and confidence extraction can run on CPU with `--device cpu --dtype float32`.
+- GPU inference/training mainly differs in device placement and dtype, usually `float16`.
+- LoRA fine-tuning on CPU is technically supported through `training/train_cpu.py`, but it is very slow. Use GPU for full training when available.
+- `peft` is required only for `ft` and `adv` LoRA adapters, not for zero-shot CPU evaluation.
+
+## Notes
+
+- The default analysis split is set in `analysis/_paths.py` as `EVAL_SPLIT`.
+- Result filenames use `zs`, `ft`, and `adv` consistently.
+- Invalid model generations are kept in the result arrays as prediction `-1`
+  (`invalid`) so they are counted as errors instead of silently removed.

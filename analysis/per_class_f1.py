@@ -2,37 +2,32 @@
 Per-class F1 table across models and conditions.
 
 Input:  data/results/experiment_results_*.json
-        Format: {condition: {golds:[int], preds:[int], macro_f1:float, per_class_f1:[f,f,f,f]}}
-        Label int: 0=support 1=deny 2=query 3=comment
-
 Output: analysis/output/per_class_f1.csv
+
+Columns: model, split, condition, support_f1, deny_f1, query_f1, comment_f1, macro_f1, n
 """
 from __future__ import annotations
-import json
 import sys
 from pathlib import Path
 
-# allow running from project root or analysis/ directory
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _paths import DATA_RESULTS, OUTPUT, MODEL_FILES, CONDITIONS, INT2LABEL, LABELS
+from _paths import (
+    DATA_RESULTS, OUTPUT, MODEL_FILES, CONDITIONS, COND_TO_FIELD,
+    INT2LABEL, LABELS, EVAL_SPLIT, load_exp,
+)
 
 import pandas as pd
 from sklearn.metrics import classification_report
 
 
-def load_exp(path: Path) -> dict:
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def per_class_f1_from_data(data: dict, condition: str) -> dict | None:
-    if condition not in data:
+def per_class_f1_from_data(split_data: dict, condition: str) -> dict | None:
+    if condition not in split_data:
         return None
-    cond = data[condition]
-    golds = [INT2LABEL[g] for g in cond["golds"]]
-    preds = [INT2LABEL[p] for p in cond["preds"]]
+    cond  = split_data[condition]
+    golds = [INT2LABEL.get(g, "invalid") for g in cond["golds"]]
+    preds = [INT2LABEL.get(p, "invalid") for p in cond["preds"]]
     report = classification_report(
-        golds, preds, labels=LABELS, output_dict=True, zero_division=0
+        golds, preds, labels=LABELS, output_dict=True, zero_division=0,
     )
     return {
         "support_f1": round(report["support"]["f1-score"], 4),
@@ -49,14 +44,22 @@ def main() -> None:
     for fname, model_tag in MODEL_FILES.items():
         path = DATA_RESULTS / fname
         if not path.exists():
-            print(f"[skip] {path} not found")
+            print(f"[skip] {path.name} not found")
             continue
-        data = load_exp(path)
+        split_data = load_exp(path, EVAL_SPLIT)
+        if not split_data:
+            print(f"[skip] no data for split='{EVAL_SPLIT}' in {path.name}")
+            continue
         for cond in CONDITIONS:
-            result = per_class_f1_from_data(data, cond)
+            result = per_class_f1_from_data(split_data, cond)
             if result is None:
                 continue
-            rows.append({"model": model_tag, "condition": cond, **result})
+            rows.append({
+                "model":     model_tag,
+                "split":     EVAL_SPLIT,
+                "condition": COND_TO_FIELD[cond],
+                **result,
+            })
 
     df = pd.DataFrame(rows)
     print(df.to_string(index=False))
